@@ -314,16 +314,14 @@ def compute_error(model_file, data_loader, cuda_on=False, name = ''):
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in data_loader:
-        if cuda_on:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += F.nll_loss(output, target, size_average=False).data[
-            0]  # sum up batch loss
-        pred = output.data.max(1, keepdim=True)[
-            1]  # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+    with torch.no_grad():
+        for data, target in data_loader:
+            if cuda_on:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
+            test_loss += F.cross_entropy(output, target, reduction='sum').item()
+            pred = output.data.max(1, keepdim=True)[1]
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
 
     test_loss /= len(data_loader.dataset)
     print(name + 'Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
@@ -405,22 +403,22 @@ def compute_error_general(model_file, data_loader, cuda_on=False,
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in data_loader:
-        if cuda_on:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        
-        if fast:
-            output = model.fast_forward_BF(data)
-        else:
-            output = model.forward(data)
+    with torch.no_grad():
+        for data, target in data_loader:
+            if cuda_on:
+                data, target = data.cuda(), target.cuda()
 
-        if task == "classification":
-            test_loss += F.nll_loss(output, target, size_average=False).data[0]
-            pred = output.data.max(1, keepdim=True)[1]
-            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-        else:
-            raise NotImplementedError("The specified task is not supported")
+            if fast:
+                output = model.fast_forward_BF(data)
+            else:
+                output = model.forward(data)
+
+            if task == "classification":
+                test_loss += F.cross_entropy(output, target, reduction='sum').item()
+                pred = output.data.max(1, keepdim=True)[1]
+                correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+            else:
+                raise NotImplementedError("The specified task is not supported")
 
     # Normalise the loss and print:
     if task == "classification":
@@ -477,27 +475,26 @@ def compute_error_general_ensemble(model_file_list, data_loader, cuda_on=False,
     test_loss = 0
     correct = 0
 
-    for data, target in data_loader:
-        if cuda_on:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
+    with torch.no_grad():
+        for data, target in data_loader:
+            if cuda_on:
+                data, target = data.cuda(), target.cuda()
 
-        # compute the average prediction over different models
-        output = 0.0
-        for model in model_list:
-            if fast:
-                output += model.fast_forward_BF(data)
-            else:
-                output += model.forward(data)
-        output /= len(model_list)
+            # compute the average prediction over different models
+            output = 0.0
+            for model in model_list:
+                if fast:
+                    output += model.fast_forward_BF(data)
+                else:
+                    output += model.forward(data)
+            output /= len(model_list)
 
-        if task == "classification":
-            test_loss += F.nll_loss(output, target, size_average=False).data[0]
-            pred = output.data.max(1, keepdim=True)[1]
-            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-        elif task == "regression":
-            # print(test_loss)
-            test_loss += F.mse_loss(output, target, size_average=False).data[0]
+            if task == "classification":
+                test_loss += F.cross_entropy(output, target, reduction='sum').item()
+                pred = output.data.max(1, keepdim=True)[1]
+                correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+            elif task == "regression":
+                test_loss += F.mse_loss(output, target, reduction='sum').item()
 
     # Normalise the loss and print:
     if task == "classification":

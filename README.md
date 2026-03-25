@@ -36,47 +36,81 @@ bash ./install.sh
 
 ## Usage
 
-An example command for training/testing an ANT is given below.
+Training is now config-driven. `tree.py` takes only dataset and experiment name,
+and loads all model/training hyperparameters from `training_config.py`.
+
+Single run:
 
 ```bash
-python tree.py --experiment test_ant_cifar10  #name of experiment \
-               --subexperiment myant  #name of subexperiment \
-               --dataset cifar10   #dataset \
-                # Model details:    \
-               --router_ver 3        #type of router module \
-               --router_ngf 128      #no. of kernels in routers \
-               --router_k 3          #spatial size of kernels in routers \
-               --transformer_ver 5   #type of transformer module \
-               --transformer_ngf 128 #no. of kernels in transformers \
-               --transformer_k 3     #spatial size of kernels in transformers \
-               --solver_ver 6        #type of solver module \
-               --batch_norm          #apply batch-norm \
-               --maxdepth 10         #maximum depth of the tree-structure \
-                # Training details: \
-               --batch-size 512    #batch size \
-               --augmentation_on   #apply data augmentation \
-               --scheduler step_lr #learning rate scheduling \
-               --criteria avg_valid_loss # splitting criteria
-               --epochs_patience 5 #no. of patience per node for growth phase \
-               --epochs_node 100   #max no. of epochs per node for growth phase \
-               --epochs_finetune 200 #no. of epochs for fine-tuning phase \
-               # Others: \
-               --seed 0            #randomisation seed
-               --num_workers 0     #no. of CPU subprocesses used for data loading \
-               --visualise_split  # save the tree structure every epoch \
+python tree.py --dataset protein --experiment seed1
 ```
-The model configurations and optimisation trajectory (e.g value of
-train/validation loss at each time point) are saved in `records.jason` in the 
-directory `./experiments/dataset/experiment/subexperiment/checkpoints`. Similarly,
-tree structure and best trained model are saved as `tree_structures.json`
-and `model.pth`, respectively under the same directory. If the visualisation option 
-`--visualise_split` is used, the tree architecture of the ANT is saved in the PNG
-format in the directory `./experiments/dataset/experiment/subexperiment/cfigures`.
 
-By default, the average classification accuracy is also computed
-on train/valid/test sets for every epoch and saved in `records.jason` file, so
-running `tree.py` would suffice for both training and testing an ANT of particular 
-configurations. 
+Outputs for each run are written under:
+
+`./experiments/<dataset>/<experiment>/checkpoints/`
+
+Key files:
+
+- `model.pth`: final model checkpoint
+- `tree_structures.json`: learned tree structure
+- `records.json`: training trajectory and metrics
+- `performance.txt`: final soft vs hard (single-path greedy) report including:
+  - soft train/valid/test accuracy
+  - hard train/valid/test accuracy
+  - total training time
+
+Run 5 seeds and aggregate mean/std automatically:
+
+```bash
+./train.sh <dataset>
+```
+
+Example:
+
+```bash
+./train.sh protein
+```
+
+This runs experiments with names `seed1` ... `seed5`, reads each seed's
+`performance.txt`, and reports:
+
+- soft train/test mean ± std
+- hard train/test mean ± std
+- average training time across 5 seeds
+
+It also saves aggregated results to:
+
+`./experiments/<dataset>/results_summary.txt`
+
+## Supported Datasets & Recommended Configurations
+
+The codebase supports both image and tabular datasets. Training details are loaded
+automatically from `training_config.py` based on dataset code.
+
+### Dataset Codes
+
+- `mnist`
+- `cifar10`
+- `letter`
+- `connect`
+- `census`
+- `forest`
+- `segment`
+- `satimages`
+- `pendigits`
+- `protein`
+- `sensit`
+
+Example runs:
+
+```bash
+python tree.py --dataset mnist --experiment seed1
+python tree.py --dataset cifar10 --experiment seed1
+python tree.py --dataset protein --experiment seed1
+```
+
+If you want to change model/training hyperparameters, edit the corresponding
+dataset entry in `training_config.py`.
 
 **Jupyter Notebooks**
 

@@ -99,6 +99,7 @@ class Tree(nn.Module):
             self.child_right.add_module('transform', child_right["transform"])
             self.child_right.add_module('classifier', child_right["classifier"])
             self.child_right.add_module('router', child_right["router"])
+
         
         # case (2): making deeper
         if extend:
@@ -380,7 +381,7 @@ class Tree(nn.Module):
         if not (isinstance(prob, float)):
             prob = torch.unsqueeze(prob, 1)
             prob_sum = prob.sum(dim=0)
-            return prob_sum.data[0]
+            return prob_sum.item()
         else:
             return prob*input.size(0)
 
@@ -672,10 +673,10 @@ class Router(nn.Module):
         # stochastic hard decision:
         if self.stochastic:
             x = self.sigmoid(x)
-            return ops.ST_StochasticIndicator()(x)
+            return ops.ST_StochasticIndicator.apply(x)
         else:
             x = self.sigmoid(x)
-            return ops.ST_Indicator()(x)
+            return ops.ST_Indicator.apply(x)
 
 
 class RouterGAP(nn.Module):
@@ -720,9 +721,9 @@ class RouterGAP(nn.Module):
             return output
 
         if self.stochastic:
-            return ops.ST_StochasticIndicator()(output)
+            return ops.ST_StochasticIndicator.apply(output)
         else:
-            return ops.ST_Indicator()(output)
+            return ops.ST_Indicator.apply(output)
 
 
 class RouterGAPwithDoubleConv(nn.Module):
@@ -772,10 +773,10 @@ class RouterGAPwithDoubleConv(nn.Module):
         # stochastic hard decision:
         if self.stochastic:
             x = self.sigmoid(x)
-            return ops.ST_StochasticIndicator()(x)
+            return ops.ST_StochasticIndicator.apply(x)
         else:
             x = self.sigmoid(x)
-            return ops.ST_Indicator()(x)
+            return ops.ST_Indicator.apply(x)
 
 
 class Router_MLP_h1(nn.Module):
@@ -791,13 +792,21 @@ class Router_MLP_h1(nn.Module):
         self.stochastic=stochastic
 
         width = input_nc*input_width*input_height
-        self.fc1 = nn.Linear(width, width/reduction_rate + 1)
+        hidden = int(width/reduction_rate + 1)
+        self.fc1 = nn.Linear(width, hidden)
+        self.fc2 = nn.Linear(hidden, 1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         # 2 fc layers:
         x = x.view(x.size(0), -1)
-        x = F.relu(self.fc1(x)).squeeze()
+        x = F.relu(self.fc1(x))
+        # Backward compatibility: older checkpoints may not have fc2.
+        if hasattr(self, 'fc2'):
+            x = self.fc2(x)
+        else:
+            x = x.mean(dim=1, keepdim=True)
+        x = x.squeeze(-1)
         # get probability of "left" or "right"
         x = self.output_controller(x)
         return x
@@ -810,10 +819,10 @@ class Router_MLP_h1(nn.Module):
         # stochastic hard decision:
         if self.stochastic:
             x = self.sigmoid(x)
-            return ops.ST_StochasticIndicator()(x)
+            return ops.ST_StochasticIndicator.apply(x)
         else:
             x = self.sigmoid(x)
-            return ops.ST_Indicator()(x)
+            return ops.ST_Indicator.apply(x)
 
 
 class RouterGAP_TwoFClayers(nn.Module):
@@ -832,8 +841,8 @@ class RouterGAP_TwoFClayers(nn.Module):
         self.stochastic=stochastic
         self.dropout_prob = dropout_prob
     
-        self.fc1 = nn.Linear(input_nc, input_nc/reduction_rate + 1)
-        self.fc2 = nn.Linear(input_nc/reduction_rate + 1, 1)
+        self.fc1 = nn.Linear(input_nc, int(input_nc/reduction_rate + 1))
+        self.fc2 = nn.Linear(int(input_nc/reduction_rate + 1), 1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -855,10 +864,10 @@ class RouterGAP_TwoFClayers(nn.Module):
         # stochastic hard decision:
         if self.stochastic:
             x = self.sigmoid(x)
-            return ops.ST_StochasticIndicator()(x)
+            return ops.ST_StochasticIndicator.apply(x)
         else:
             x = self.sigmoid(x)
-            return ops.ST_Indicator()(x)
+            return ops.ST_Indicator.apply(x)
 
 
 class RouterGAPwithConv_TwoFClayers(nn.Module):
@@ -884,8 +893,8 @@ class RouterGAPwithConv_TwoFClayers(nn.Module):
             kernel_size = max(input_width, input_height)
 
         self.conv1 = nn.Conv2d(input_nc, ngf, kernel_size=kernel_size)
-        self.fc1 = nn.Linear(ngf, ngf/reduction_rate + 1)
-        self.fc2 = nn.Linear(ngf/reduction_rate + 1, 1)
+        self.fc1 = nn.Linear(ngf, int(ngf/reduction_rate + 1))
+        self.fc2 = nn.Linear(int(ngf/reduction_rate + 1), 1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -909,10 +918,10 @@ class RouterGAPwithConv_TwoFClayers(nn.Module):
         # stochastic hard decision:
         if self.stochastic:
             x = self.sigmoid(x)
-            return ops.ST_StochasticIndicator()(x)
+            return ops.ST_StochasticIndicator.apply(x)
         else:
             x = self.sigmoid(x)
-            return ops.ST_Indicator()(x)
+            return ops.ST_Indicator.apply(x)
 
 
 # ############################ (3) Solvers ####################################
@@ -925,7 +934,7 @@ class LR(nn.Module):
 
     def forward(self, x):
         x = x.view(x.size(0), -1)
-        return F.log_softmax(self.fc(x))
+        return F.log_softmax(self.fc(x), dim=-1)
 
 
 class MLP_LeNet(nn.Module):
@@ -943,83 +952,91 @@ class MLP_LeNet(nn.Module):
         out = F.relu(self.fc1(out))
         out = F.relu(self.fc2(out))
         out = self.fc3(out)
-        return F.log_softmax(out)
+        return F.log_softmax(out, dim=-1)
 
 
 class MLP_LeNetMNIST(nn.Module):
     """ The last fully connected part of LeNet MNIST:
     https://github.com/BVLC/caffe/blob/master/examples/mnist/lenet.prototxt
     """
-    def __init__(self, input_nc, input_width, input_height, dropout_prob=0.0, **kwargs):
+    def __init__(self, input_nc, input_width, input_height,
+                 no_classes=10, dropout_prob=0.0, **kwargs):
         super(MLP_LeNetMNIST, self).__init__()
         self.dropout_prob = dropout_prob
         ngf = input_nc*input_width*input_height
         self.fc1 = nn.Linear(ngf, int(round(ngf/1.6)))
-        self.fc2 = nn.Linear(int(round(ngf/1.6)), 10)
+        self.fc2 = nn.Linear(int(round(ngf/1.6)), no_classes)
        
     def forward(self, x):
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training, p=self.dropout_prob)
         x = self.fc2(x)
-        return F.log_softmax(x)
+        return F.log_softmax(x, dim=-1)
 
 
 class Solver_GAP_TwoFClayers(nn.Module):
     """ GAP + fc1 + fc2 """
-    def __init__(self, input_nc, input_width, input_height, 
-                 dropout_prob=0.0, reduction_rate=2, **kwargs):
+    def __init__(self, input_nc, input_width, input_height,
+                 no_classes=10, dropout_prob=0.0, reduction_rate=2, **kwargs):
         super(Solver_GAP_TwoFClayers, self).__init__()
         self.dropout_prob = dropout_prob
         self.reduction_rate = reduction_rate
 
-        self.fc1 = nn.Linear(input_nc, input_nc/reduction_rate + 1)
-        self.fc2 = nn.Linear(input_nc/reduction_rate + 1, 10)
+        self.fc1 = nn.Linear(input_nc, int(input_nc/reduction_rate + 1))
+        self.fc2 = nn.Linear(int(input_nc/reduction_rate + 1), no_classes)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # spatial averaging
-        x = x.mean(dim=-1).mean(dim=-1).squeeze()  # global average pooling
+        # Handle both 4D image tensors and 2D tabular tensors.
+        if x.dim() > 2:
+            x = x.mean(dim=-1).mean(dim=-1)
+        else:
+            x = x.view(x.size(0), -1)
         # 2 fc layers:
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training, p=self.dropout_prob)
-        x = self.fc2(x).squeeze()
-        return F.log_softmax(x)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=-1)
 
 
 class MLP_AlexNet(nn.Module):
     """ The last fully connected part of LeNet MNIST:
     https://github.com/BVLC/caffe/blob/master/examples/mnist/lenet.prototxt
     """
-    def __init__(self, input_nc, input_width, input_height, dropout_prob=0.0, **kwargs):
+    def __init__(self, input_nc, input_width, input_height,
+                 no_classes=10, dropout_prob=0.0, **kwargs):
         super(MLP_AlexNet, self).__init__()
         self.dropout_prob = dropout_prob
         ngf = input_nc * input_width * input_height
         self.fc1 = nn.Linear(ngf, 128)
-        self.fc2 = nn.Linear(128, 10)
+        self.fc2 = nn.Linear(128, no_classes)
        
     def forward(self, x):
         x = x.view(x.size(0), -1)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training, p=self.dropout_prob)
         x = self.fc2(x)
-        return F.log_softmax(x)
+        return F.log_softmax(x, dim=-1)
 
 
 class Solver_GAP_OneFClayers(nn.Module):
     """ GAP + fc1 """
-    def __init__(self, input_nc, input_width, input_height, 
-                 dropout_prob=0.0, reduction_rate=2, **kwargs):
+    def __init__(self, input_nc, input_width, input_height,
+                 no_classes=10, dropout_prob=0.0, reduction_rate=2, **kwargs):
         super(Solver_GAP_OneFClayers, self).__init__()
         self.dropout_prob = dropout_prob
         self.reduction_rate = reduction_rate
 
-        self.fc1 = nn.Linear(input_nc, 10)
+        self.fc1 = nn.Linear(input_nc, no_classes)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # spatial averaging
-        x = x.mean(dim=-1).mean(dim=-1).squeeze()  
+        # Handle both 4D image tensors and 2D tabular tensors.
+        if x.dim() > 2:
+            x = x.mean(dim=-1).mean(dim=-1)
+        else:
+            x = x.view(x.size(0), -1)
         x = F.dropout(x, training=self.training, p=self.dropout_prob)
         x = self.fc1(x)
-        return F.log_softmax(x)
+        return F.log_softmax(x, dim=-1)

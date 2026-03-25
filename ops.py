@@ -26,10 +26,12 @@ class ST_Indicator(torch.autograd.Function):
     rounds a tensor whose values are in [0,1] to a tensor with values in {0, 1},
     using identity for its gradient.
     """
-    def forward(self, input):
+    @staticmethod
+    def forward(ctx, input):
         return torch.round(input)
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         """
         In the backward pass, just use unscaled straight-through estimator.
         """
@@ -41,7 +43,8 @@ class ST_StochasticIndicator(torch.autograd.Function):
     indicator function 1(z =< input) where z is drawn from Uniform[0,1]
     with identity for its gradient.
     """
-    def forward(self, input):
+    @staticmethod
+    def forward(ctx, input):
         """
         Args:
             input (float tensor of values between 0 and 1): threshold prob
@@ -55,7 +58,8 @@ class ST_StochasticIndicator(torch.autograd.Function):
         # z = torch.FloatTensor(input.shape).uniform_(0, 1)
         return torch.abs(torch.round(input-z+0.5))
 
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         """
         In the backward pass, just use unscaled straight-through estimator.
         """

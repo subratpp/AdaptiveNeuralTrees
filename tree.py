@@ -17,65 +17,66 @@ from torch import optim
 import matplotlib
 matplotlib.use('agg')
 
-from data import get_dataloaders, get_dataset_details
+from data import get_dataloaders, get_dataset_details, normalize_dataset_name
 from models import Tree, One
 from ops import get_params_node
 from utils import define_node, get_scheduler, set_random_seed
 from visualisation import visualise_routers_behaviours
+from training_config import get_training_config
 
 
-# Experiment settings
+# Experiment settings (CLI is intentionally minimal)
 parser = argparse.ArgumentParser(description='Adaptive Neural Trees')
 parser.add_argument('--experiment', '-e', dest='experiment', default='tree', help='experiment name')
-parser.add_argument('--subexperiment','-sube', dest='subexperiment', default='', help='experiment name')
-
-parser.add_argument('--dataset', default='mnist', help='dataset type')
-parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-parser.add_argument('--gpu', type=str, default="", help='which GPU to use')
-parser.add_argument('--seed', type=int, default=0, metavar='S', help='random seed')
-parser.add_argument('--num_workers', type=int, default=0, metavar='N', help='number of threads for data-loader')
-
-# Optimization settings:
-parser.add_argument('--batch-size', type=int, default=256, metavar='N', help='input batch size for training')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N', help='how many batches to wait before logging training status')
-parser.add_argument('--augmentation_on', action='store_true', default=False, help='perform data augmentation')
-parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate')
-parser.add_argument('--scheduler', type=str, default="", help='learning rate scheduler')
-parser.add_argument('--momentum', type=float, default=0.5, metavar='M', help='SGD momentum')
-parser.add_argument('--valid_ratio', '-vr', dest='valid_ratio', type=float, default=0.1, metavar='LR', help='validation set ratio')
-
-parser.add_argument('--criteria', default='avg_valid_loss', help='growth criteria')
-parser.add_argument('--epochs_node', type=int, default=50, metavar='N', help='max number of epochs to train per node during the growth phase')
-parser.add_argument('--epochs_finetune', type=int, default=100, metavar='N', help='number of epochs for the refinement phase')
-parser.add_argument('--epochs_patience', type=int, default=5, metavar='N', help='number of epochs to be waited without improvement at each node during the growth phase')
-parser.add_argument('--maxdepth', type=int, default=10, help='maximum depth of tree')
-parser.add_argument('--finetune_during_growth', action='store_true', default=False, help='refine the tree globally during the growth phase')
-parser.add_argument('--epochs_finetune_node', type=int, default=1, metavar='N', help='number of epochs to perform global refinement at each node during the growth phase')
-
-
-# Solver, router and transformer modules:
-parser.add_argument('--router_ver', '-r_ver', dest='router_ver', type=int, default=1, help='default router version')
-parser.add_argument('--router_ngf', '-r_ngf', dest='router_ngf', type=int, default=1, help='number of feature maps in routing function')
-parser.add_argument('--router_k', '-r_k', dest='router_k', type=int, default=28, help='kernel size in routing function')
-parser.add_argument('--router_dropout_prob', '-r_drop', dest='router_dropout_prob', type=float, default=0.0, help='drop-out probabilities for router modules.')
-
-parser.add_argument('--transformer_ver', '-t_ver', dest='transformer_ver', type=int, default=1, help='default transformer version: identity')
-parser.add_argument('--transformer_ngf', '-t_ngf', dest='transformer_ngf', type=int, default=3, help='number of feature maps in residual transformer')
-parser.add_argument('--transformer_k', '-t_k', dest='transformer_k', type=int, default=5, help='kernel size in transfomer function')
-parser.add_argument('--transformer_expansion_rate', '-t_expr', dest='transformer_expansion_rate', type=int, default=1, help='default transformer expansion rate')
-parser.add_argument('--transformer_reduction_rate', '-t_redr', dest='transformer_reduction_rate', type=int, default=2, help='default transformer reduction rate')
-
-parser.add_argument('--solver_ver', '-s_ver', dest='solver_ver', type=int, default=1, help='default router version')
-parser.add_argument('--solver_inherit', '-s_inh', dest='solver_inherit',  action='store_true', help='inherit the parameters of the solver when defining two new ones for splitting a node')
-parser.add_argument('--solver_dropout_prob', '-s_drop', dest='solver_dropout_prob', type=float, default=0.0, help='drop-out probabilities for solver modules.')
-
-parser.add_argument('--downsample_interval', '-ds_int', dest='downsample_interval', type=int, default=0, help='interval between two downsampling operations via transformers i.e. 0 = downsample at every transformer')
-parser.add_argument('--batch_norm', '-bn', dest='batch_norm', action='store_true', default=False, help='turn batch norm on')
-
-# Visualisation:
-parser.add_argument('--visualise_split', action='store_true', help='visuliase how the test dist is split by the routing function')
+parser.add_argument('--dataset', default='mnist', help='dataset code (e.g. mnist, cifar10, letter)')
 
 args = parser.parse_args()
+args.dataset = normalize_dataset_name(args.dataset)
+
+# Load all training/model settings from dataset-specific config.
+cfg = get_training_config(args.dataset)
+
+# Non-config runtime defaults.
+args.subexperiment = ''
+args.no_cuda = False
+args.gpu = ''
+args.seed = 0
+args.num_workers = 0
+args.log_interval = 10
+args.augmentation_on = False
+args.momentum = 0.5
+args.criteria = 'avg_valid_loss'
+args.epochs_finetune_node = 1
+
+# Dataset-config driven parameters.
+args.lr = cfg['learning_rate']
+args.batch_size = cfg['batch_size']
+args.epochs_node = cfg['epochs_node']
+args.epochs_finetune = cfg['epochs_finetune']
+args.epochs_patience = cfg['epochs_patience']
+args.maxdepth = cfg['maxdepth']
+args.scheduler = cfg['scheduler']
+args.valid_ratio = cfg['valid_ratio']
+
+args.router_ver = cfg['router_ver']
+args.router_ngf = cfg['router_ngf']
+args.router_k = cfg['router_k']
+args.router_dropout_prob = cfg['router_dropout_prob']
+
+args.transformer_ver = cfg['transformer_ver']
+args.transformer_ngf = cfg['transformer_ngf']
+args.transformer_k = cfg['transformer_k']
+args.transformer_expansion_rate = cfg['transformer_expansion_rate']
+args.transformer_reduction_rate = cfg['transformer_reduction_rate']
+
+args.solver_ver = cfg['solver_ver']
+args.solver_inherit = cfg['solver_inherit']
+args.solver_dropout_prob = cfg['solver_dropout_prob']
+
+args.downsample_interval = cfg['downsample_interval']
+args.batch_norm = cfg['batch_norm']
+args.finetune_during_growth = cfg['finetune_during_growth']
+args.visualise_split = cfg['visualization_split']
 
 # GPUs devices:
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -110,6 +111,14 @@ records['test_best_accuracy'] = 0.0
 records['test_epoch_loss'] = []
 records['test_epoch_accuracy'] = []
 
+# Final soft and hard inference results for reporting
+records['final_soft_train_accuracy'] = 0.0
+records['final_hard_train_accuracy'] = 0.0
+records['final_soft_valid_accuracy'] = 0.0
+records['final_hard_valid_accuracy'] = 0.0
+records['final_soft_test_accuracy'] = 0.0
+records['final_hard_test_accuracy'] = 0.0
+
 
 # -----------------------------  Data loaders ---------------------------------
 train_loader, valid_loader, test_loader, NUM_TRAIN, NUM_VALID = get_dataloaders(
@@ -138,8 +147,8 @@ def train(model, data_loader, optimizer, node_idx):
         y_pred, p_out = model(x)
 
         loss = F.nll_loss(y_pred, y)
-        train_epoch_loss += loss.data[0] * y.size(0)
-        train_loss += loss.data[0] * y.size(0)
+        train_epoch_loss += loss.item() * y.size(0)
+        train_loss += loss.item() * y.size(0)
         loss.backward()
         optimizer.step()
 
@@ -184,10 +193,10 @@ def valid(model, data_loader, node_idx, struct):
         # sum up batch loss
         valid_epoch_loss += F.nll_loss(
             output, target, size_average=False,
-        ).data[0]
+        ).item()
 
         pred = output.data.max(1, keepdim=True)[1]
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+        correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
 
     valid_epoch_loss /= NUM_VALID
     valid_epoch_accuracy = 100. * correct / NUM_VALID
@@ -255,9 +264,9 @@ def test(model, data_loader):
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data, volatile=True), Variable(target)
         output = model(data)
-        test_loss += F.nll_loss(output, target, size_average=False).data[0]
+        test_loss += F.nll_loss(output, target, size_average=False).item()
         pred = output.data.max(1, keepdim=True)[1]
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+        correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
 
     test_loss /= len(data_loader.dataset)
     test_accuracy = 100. * correct / len(data_loader.dataset)
@@ -278,6 +287,134 @@ def test(model, data_loader):
             100. * correct / len(data_loader.dataset), end - start,
         ),
     )
+
+
+def evaluate_model_accuracy(model, data_loader, mode_name='soft'):
+    """Evaluate model accuracy on a dataset in soft or hard inference mode.
+    
+    Args:
+        model: Tree model to evaluate
+        data_loader: DataLoader with (x, y) batches
+        mode_name: Either 'soft' (multi-path) or 'hard' (single-path greedy)
+    
+    Returns:
+        accuracy: Percentage accuracy on the dataset
+    """
+    model.eval()
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for data, target in data_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
+            pred = output.data.max(1, keepdim=True)[1]
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+            total += target.size(0)
+    
+    accuracy = 100. * correct / total if total > 0 else 0.0
+    return accuracy
+
+
+def evaluate_and_record_final_results(model, tree_struct, train_loader, valid_loader, test_loader, start_time=None):
+    """Evaluate model in both soft and hard modes and record final accuracies.
+    
+    Args:
+        model: Tree model (in soft mode)
+        tree_struct: Tree structure info
+        train_loader, valid_loader, test_loader: DataLoaders
+        start_time: Start time of training (for elapsed time calculation)
+    """
+    from utils import load_tree_model
+    
+    # Calculate total training time
+    end_time = time.time()
+    total_train_time = end_time - start_time if start_time is not None else 0
+    train_hours = int(total_train_time // 3600)
+    train_mins = int((total_train_time % 3600) // 60)
+    train_secs = int(total_train_time % 60)
+    
+    print("\n" + "="*60)
+    print("Final Inference Evaluation: Soft vs Hard")
+    print("="*60)
+    print(f"Total Training Time: {train_hours:02d}h {train_mins:02d}m {train_secs:02d}s ({total_train_time:.1f}s)")
+    
+    model_path = "./experiments/{}/{}/{}/checkpoints/model.pth".format(
+        args.dataset, args.experiment, args.subexperiment
+    )
+    perf_path = "./experiments/{}/{}/{}/checkpoints/performance.txt".format(
+        args.dataset, args.experiment, args.subexperiment
+    )
+    
+    # Evaluate in SOFT mode (multi-path, default)
+    print("\n[SOFT INFERENCE - Multi-path]")
+    soft_train_acc = evaluate_model_accuracy(model, train_loader, 'soft')
+    soft_valid_acc = evaluate_model_accuracy(model, valid_loader, 'soft')
+    soft_test_acc = evaluate_model_accuracy(model, test_loader, 'soft')
+    
+    print(f"  Train accuracy: {soft_train_acc:.2f}%")
+    print(f"  Valid accuracy: {soft_valid_acc:.2f}%")
+    print(f"  Test  accuracy: {soft_test_acc:.2f}%")
+    
+    records['final_soft_train_accuracy'] = soft_train_acc
+    records['final_soft_valid_accuracy'] = soft_valid_acc
+    records['final_soft_test_accuracy'] = soft_test_acc
+    
+    hard_train_acc = None
+    hard_valid_acc = None
+    hard_test_acc = None
+    
+    # Evaluate in HARD mode (single-path greedy)
+    print("\n[HARD INFERENCE - Single-path greedy]")
+    try:
+        model_hard = load_tree_model(
+            model_path, cuda_on=args.cuda,
+            soft_decision=False, stochastic=False, breadth_first=False
+        )
+        hard_train_acc = evaluate_model_accuracy(model_hard, train_loader, 'hard')
+        hard_valid_acc = evaluate_model_accuracy(model_hard, valid_loader, 'hard')
+        hard_test_acc = evaluate_model_accuracy(model_hard, test_loader, 'hard')
+        
+        print(f"  Train accuracy: {hard_train_acc:.2f}%")
+        print(f"  Valid accuracy: {hard_valid_acc:.2f}%")
+        print(f"  Test  accuracy: {hard_test_acc:.2f}%")
+        
+        records['final_hard_train_accuracy'] = hard_train_acc
+        records['final_hard_valid_accuracy'] = hard_valid_acc
+        records['final_hard_test_accuracy'] = hard_test_acc
+    except Exception as e:
+        print(f"  Error loading hard model: {e}")
+        print("  Skipping hard inference evaluation.")
+    
+    print("\n" + "="*60)
+    
+    # Write results to performance.txt
+    with open(perf_path, 'w') as f:
+        f.write("="*60 + "\n")
+        f.write("Final Inference Performance Report\n")
+        f.write("="*60 + "\n")
+        f.write(f"Dataset: {args.dataset}\n")
+        f.write(f"Experiment: {args.experiment}\n")
+        f.write(f"Training Time: {train_hours:02d}h {train_mins:02d}m {train_secs:02d}s\n")
+        f.write(f"Training Time (seconds): {total_train_time:.1f}\n\n")
+        
+        f.write("[SOFT INFERENCE - Multi-path]\n")
+        f.write(f"  Train accuracy: {soft_train_acc:.2f}%\n")
+        f.write(f"  Valid accuracy: {soft_valid_acc:.2f}%\n")
+        f.write(f"  Test  accuracy: {soft_test_acc:.2f}%\n\n")
+        
+        f.write("[HARD INFERENCE - Single-path greedy]\n")
+        if hard_train_acc is not None:
+            f.write(f"  Train accuracy: {hard_train_acc:.2f}%\n")
+            f.write(f"  Valid accuracy: {hard_valid_acc:.2f}%\n")
+            f.write(f"  Test  accuracy: {hard_test_acc:.2f}%\n")
+        else:
+            f.write("  Error loading hard model - skipped\n")
+        
+        f.write("\n" + "="*60 + "\n")
+    
+    print(f"\nPerformance results saved to {perf_path}")
 
 
 def _load_checkpoint(model_file_name):
@@ -721,6 +858,23 @@ def grow_ant_nodewise():
         checkpoint_model('model.pth', struct=tree_struct, modules=tree_modules,
                          data_loader=test_loader,
                          figname='hist_split_node_finetune.png')
+    checkpoint_msc(tree_struct, records)
+    
+    # ############### 3: Final evaluation (soft vs hard) #####################
+    # Evaluate final model in both soft and hard inference modes
+    model_final = Tree(tree_struct, tree_modules,
+                       split=False,
+                       cuda_on=args.cuda)
+    if args.cuda:
+        model_final.cuda()
+    
+    evaluate_and_record_final_results(
+        model_final, tree_struct,
+        train_loader, valid_loader, test_loader,
+        start_time=start
+    )
+    
+    # Save the final records with soft/hard results
     checkpoint_msc(tree_struct, records)
 
 
