@@ -29,6 +29,7 @@ from training_config import get_training_config
 parser = argparse.ArgumentParser(description='Adaptive Neural Trees')
 parser.add_argument('--experiment', '-e', dest='experiment', default='tree', help='experiment name')
 parser.add_argument('--dataset', default='mnist', help='dataset code (e.g. mnist, cifar10, letter)')
+parser.add_argument('--seed', type=int, default=0, help='random seed for reproducibility')
 
 args = parser.parse_args()
 args.dataset = normalize_dataset_name(args.dataset)
@@ -38,9 +39,9 @@ cfg = get_training_config(args.dataset)
 
 # Non-config runtime defaults.
 args.subexperiment = ''
-args.no_cuda = False
+args.no_cuda = not cfg.get('use_gpu', True)
 args.gpu = ''
-args.seed = 0
+# args.seed is set via CLI argument (--seed) above with default value 0
 args.num_workers = 0
 args.log_interval = 10
 args.augmentation_on = False
@@ -131,12 +132,24 @@ args.no_classes = len(args.classes)
 
 
 # -----------------------------  Components ----------------------------------
+def print_model_parameter_stats(model, title='Model'):
+    """Print total and trainable parameter counts for a model."""
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("{} parameters: total={}, trainable={}".format(
+        title,
+        "{:,}".format(total_params),
+        "{:,}".format(trainable_params),
+    ))
+
+
 def train(model, data_loader, optimizer, node_idx):
     """ Train step"""
     model.train()
     train_loss = 0
     no_points = 0
     train_epoch_loss = 0
+    optimizer_switched = False
 
     # train the model
     for batch_idx, (x, y) in enumerate(data_loader):
@@ -150,7 +163,24 @@ def train(model, data_loader, optimizer, node_idx):
         train_epoch_loss += loss.item() * y.size(0)
         train_loss += loss.item() * y.size(0)
         loss.backward()
-        optimizer.step()
+
+        # Adam allocates optimizer states lazily on step(); if this OOMs on GPU,
+        # fallback to SGD (lower optimizer-state memory footprint) and continue.
+        try:
+            optimizer.step()
+        except RuntimeError as e:
+            err = str(e).lower()
+            is_cuda_oom = 'out of memory' in err and 'cuda' in err
+            if is_cuda_oom and isinstance(optimizer, optim.Adam):
+                print("\nCUDA OOM during Adam step; switching optimizer to SGD for lower memory usage.")
+                if args.cuda:
+                    torch.cuda.empty_cache()
+                params = [p for group in optimizer.param_groups for p in group['params']]
+                optimizer = optim.SGD(params, lr=args.lr, momentum=args.momentum)
+                optimizer.step()
+                optimizer_switched = True
+            else:
+                raise
 
         records['counter'] += 1
         no_points += y.size(0)
@@ -176,6 +206,7 @@ def train(model, data_loader, optimizer, node_idx):
         records['train_best_loss'] = train_epoch_loss
 
     print('\nTrain set: Average loss: {:.4f}'.format(train_epoch_loss))
+    return optimizer, optimizer_switched
 
 
 def valid(model, data_loader, node_idx, struct):
@@ -289,7 +320,7 @@ def test(model, data_loader):
     )
 
 
-def evaluate_model_accuracy(model, data_loader, mode_name='soft'):
+def evaluate_model_accuracy(model, data_loader, mode_name='soft', use_cuda=False):
     """Evaluate model accuracy on a dataset in soft or hard inference mode.
     
     Args:
@@ -306,7 +337,7 @@ def evaluate_model_accuracy(model, data_loader, mode_name='soft'):
     
     with torch.no_grad():
         for data, target in data_loader:
-            if args.cuda:
+            if use_cuda:
                 data, target = data.cuda(), target.cuda()
             output = model(data)
             pred = output.data.max(1, keepdim=True)[1]
@@ -347,11 +378,18 @@ def evaluate_and_record_final_results(model, tree_struct, train_loader, valid_lo
         args.dataset, args.experiment, args.subexperiment
     )
     
+    # Keep GPU memory for training only: run final evaluation on CPU.
+    if args.cuda:
+        model = model.cpu()
+        torch.cuda.empty_cache()
+
+    print("Final evaluation device: CPU (GPU reserved for training only)")
+
     # Evaluate in SOFT mode (multi-path, default)
     print("\n[SOFT INFERENCE - Multi-path]")
-    soft_train_acc = evaluate_model_accuracy(model, train_loader, 'soft')
-    soft_valid_acc = evaluate_model_accuracy(model, valid_loader, 'soft')
-    soft_test_acc = evaluate_model_accuracy(model, test_loader, 'soft')
+    soft_train_acc = evaluate_model_accuracy(model, train_loader, 'soft', use_cuda=False)
+    soft_valid_acc = evaluate_model_accuracy(model, valid_loader, 'soft', use_cuda=False)
+    soft_test_acc = evaluate_model_accuracy(model, test_loader, 'soft', use_cuda=False)
     
     print(f"  Train accuracy: {soft_train_acc:.2f}%")
     print(f"  Valid accuracy: {soft_valid_acc:.2f}%")
@@ -369,12 +407,12 @@ def evaluate_and_record_final_results(model, tree_struct, train_loader, valid_lo
     print("\n[HARD INFERENCE - Single-path greedy]")
     try:
         model_hard = load_tree_model(
-            model_path, cuda_on=args.cuda,
+            model_path, cuda_on=False,
             soft_decision=False, stochastic=False, breadth_first=False
         )
-        hard_train_acc = evaluate_model_accuracy(model_hard, train_loader, 'hard')
-        hard_valid_acc = evaluate_model_accuracy(model_hard, valid_loader, 'hard')
-        hard_test_acc = evaluate_model_accuracy(model_hard, test_loader, 'hard')
+        hard_train_acc = evaluate_model_accuracy(model_hard, train_loader, 'hard', use_cuda=False)
+        hard_valid_acc = evaluate_model_accuracy(model_hard, valid_loader, 'hard', use_cuda=False)
+        hard_test_acc = evaluate_model_accuracy(model_hard, test_loader, 'hard', use_cuda=False)
         
         print(f"  Train accuracy: {hard_train_acc:.2f}%")
         print(f"  Valid accuracy: {hard_valid_acc:.2f}%")
@@ -552,6 +590,8 @@ def optimize_fixed_tree(
         if not(p.requires_grad):
             print("(Grad not required)" + names[i])
 
+    print_model_parameter_stats(model, title='Current model')
+
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, params), lr=args.lr,
     )
@@ -577,7 +617,9 @@ def optimize_fixed_tree(
         print("\n----- Layer {}, Node {}, Epoch {}/{}, Patience {}/{}---------".
               format(tree_struct[node_idx]['level'], node_idx, 
                      epoch, no_epochs, patience_cnt, args.epochs_patience))
-        train(model, train_loader, optimizer, node_idx)
+        optimizer, optimizer_switched = train(model, train_loader, optimizer, node_idx)
+        if optimizer_switched and args.scheduler:
+            scheduler = get_scheduler(args.scheduler, optimizer, grow)
         valid_loss_new = valid(model, valid_loader, node_idx, tree_struct)
         
         # learning rate scheduling:
@@ -867,6 +909,8 @@ def grow_ant_nodewise():
                        cuda_on=args.cuda)
     if args.cuda:
         model_final.cuda()
+
+    print_model_parameter_stats(model_final, title='Final tree model')
     
     evaluate_and_record_final_results(
         model_final, tree_struct,

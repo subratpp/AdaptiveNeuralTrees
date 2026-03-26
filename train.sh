@@ -10,8 +10,13 @@ if [ $# -eq 0 ]; then
 fi
 
 DATASET=$1
-NUM_RUNS=5
-SEEDS=("seed1" "seed2" "seed3" "seed4" "seed5")
+NUM_RUNS=10
+SEEDS=("seed1" "seed2" "seed3" "seed4" "seed5" "seed6" "seed7" "seed8" "seed9" "seed10")
+
+# Help CUDA allocator reduce fragmentation unless user already configured it.
+if [ -z "$PYTORCH_CUDA_ALLOC_CONF" ]; then
+    export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128"
+fi
 
 echo "============================================================"
 echo "Training Adaptive Neural Trees on $DATASET"
@@ -29,11 +34,12 @@ train_times=()
 # Run training 5 times
 for i in $(seq 0 $((NUM_RUNS - 1))); do
     SEED=${SEEDS[$i]}
+    SEED_NUM=$((i + 1))
     
-    echo "[Run $((i+1))/$NUM_RUNS] Training with experiment=$SEED"
+    echo "[Run $((i+1))/$NUM_RUNS] Training with experiment=$SEED (seed=$SEED_NUM)"
     
-    # Run training
-    python tree.py --dataset "$DATASET" --experiment "$SEED"
+    # Run training with unique seed for each run
+    python tree.py --dataset "$DATASET" --experiment "$SEED" --seed "$SEED_NUM"
     
     if [ $? -ne 0 ]; then
         echo "ERROR: Training failed for seed $SEED"

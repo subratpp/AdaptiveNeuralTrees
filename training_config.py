@@ -8,8 +8,9 @@ TRAINING_CONFIGS = {
     "mnist": {
         "learning_rate": 0.0001,
         "batch_size": 256,
-        "epochs_node": 10,
-        "epochs_finetune": 100,
+        "use_gpu": True,
+        "epochs_node": 20,
+        "epochs_finetune": 20,
         "epochs_patience": 5,
         "maxdepth": 8,
         "router_ver": 2,
@@ -34,6 +35,7 @@ TRAINING_CONFIGS = {
     "cifar10": {
         "learning_rate": 0.001,
         "batch_size": 512,
+        "use_gpu": True,
         "epochs_node": 100,
         "epochs_finetune": 200,
         "epochs_patience": 5,
@@ -60,6 +62,7 @@ TRAINING_CONFIGS = {
     "letter": {
         "learning_rate": 0.005,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 100,
         "epochs_finetune": 100,
         "epochs_patience": 5,
@@ -86,6 +89,7 @@ TRAINING_CONFIGS = {
     "connect": {
         "learning_rate": 0.001,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 20,
         "epochs_finetune": 20,
         "epochs_patience": 5,
@@ -112,6 +116,7 @@ TRAINING_CONFIGS = {
     "census": {
         "learning_rate": 0.001,
         "batch_size": 256,
+        "use_gpu": True,
         "epochs_node": 80,
         "epochs_finetune": 150,
         "epochs_patience": 5,
@@ -138,6 +143,7 @@ TRAINING_CONFIGS = {
     "forest": {
         "learning_rate": 0.01,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 100,
         "epochs_finetune": 200,
         "epochs_patience": 5,
@@ -164,6 +170,7 @@ TRAINING_CONFIGS = {
     "segment": {
         "learning_rate": 0.005,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 50,
         "epochs_finetune": 30,
         "epochs_patience": 5,
@@ -190,6 +197,7 @@ TRAINING_CONFIGS = {
     "satimages": {
         "learning_rate": 0.005,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 15,
         "epochs_finetune": 5,
         "epochs_patience": 5,
@@ -216,6 +224,7 @@ TRAINING_CONFIGS = {
     "pendigits": {
         "learning_rate": 0.005,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 50,
         "epochs_finetune": 30,
         "epochs_patience": 5,
@@ -242,6 +251,7 @@ TRAINING_CONFIGS = {
     "protein": {
         "learning_rate": 0.0001,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 10,
         "epochs_finetune": 5,
         "epochs_patience": 5,
@@ -268,6 +278,7 @@ TRAINING_CONFIGS = {
     "sensit": {
         "learning_rate": 0.001,
         "batch_size": 128,
+        "use_gpu": True,
         "epochs_node": 100,
         "epochs_finetune": 100,
         "epochs_patience": 5,
@@ -310,6 +321,7 @@ def get_training_config(dataset):
         return {
             "learning_rate": 0.001,
             "batch_size": 128,
+            "use_gpu": True,
             "epochs_node": 50,
             "epochs_finetune": 100,
             "epochs_patience": 5,
@@ -355,6 +367,7 @@ def apply_training_config_to_args(args, cli_args=None):
     cli_flag_map = {
         'learning_rate': ['--lr'],
         'batch_size': ['--batch-size'],
+        'use_gpu': ['--use_gpu', '--no_cuda'],
         'epochs_node': ['--epochs_node'],
         'epochs_finetune': ['--epochs_finetune'],
         'epochs_patience': ['--epochs_patience'],
@@ -388,7 +401,7 @@ def apply_training_config_to_args(args, cli_args=None):
     
     # List of config parameters to apply to args
     config_keys = [
-        'learning_rate', 'batch_size', 'epochs_node', 'epochs_finetune', 
+        'learning_rate', 'batch_size', 'use_gpu', 'epochs_node', 'epochs_finetune', 
         'epochs_patience', 'maxdepth', 'router_ver', 'router_ngf', 'router_k',
         'router_dropout_prob', 'transformer_ver', 'transformer_ngf', 'transformer_k',
         'transformer_expansion_rate', 'transformer_reduction_rate', 
