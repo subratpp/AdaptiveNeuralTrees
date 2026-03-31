@@ -10,7 +10,7 @@ if [ $# -eq 0 ]; then
 fi
 
 DATASET=$1
-NUM_RUNS=10
+NUM_RUNS=1
 SEEDS=("seed1" "seed2" "seed3" "seed4" "seed5" "seed6" "seed7" "seed8" "seed9" "seed10")
 
 # Help CUDA allocator reduce fragmentation unless user already configured it.

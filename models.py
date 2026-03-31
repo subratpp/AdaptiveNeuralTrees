@@ -648,6 +648,10 @@ class Router(nn.Module):
         self.soft_decision = soft_decision
         self.stochastic=stochastic
 
+        # Guard against invalid kernel sizes from config/CLI (e.g. 0 or negative).
+        if kernel_size is None or kernel_size <= 0:
+            kernel_size = max(input_width, input_height)
+
         if max(input_width, input_height) < kernel_size:
             warnings.warn('Router kernel too large, shrink it')
             kernel_size = max(input_width, input_height)

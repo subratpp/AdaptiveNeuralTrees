@@ -78,6 +78,7 @@ args.downsample_interval = cfg['downsample_interval']
 args.batch_norm = cfg['batch_norm']
 args.finetune_during_growth = cfg['finetune_during_growth']
 args.visualise_split = cfg['visualization_split']
+args.ensemble = cfg.get('ensemble', not cfg.get('no_ensemble', False))
 
 # GPUs devices:
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -119,6 +120,7 @@ records['final_soft_valid_accuracy'] = 0.0
 records['final_hard_valid_accuracy'] = 0.0
 records['final_soft_test_accuracy'] = 0.0
 records['final_hard_test_accuracy'] = 0.0
+records['final_trainable_params'] = 0
 
 
 # -----------------------------  Data loaders ---------------------------------
@@ -215,19 +217,19 @@ def valid(model, data_loader, node_idx, struct):
     valid_epoch_loss = 0
     correct = 0
 
-    for data, target in data_loader:
-        if args.cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
+    with torch.no_grad():
+        for data, target in data_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
 
-        # sum up batch loss
-        valid_epoch_loss += F.nll_loss(
-            output, target, size_average=False,
-        ).item()
+            # sum up batch loss
+            valid_epoch_loss += F.nll_loss(
+                output, target, size_average=False,
+            ).item()
 
-        pred = output.data.max(1, keepdim=True)[1]
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+            pred = output.data.max(1, keepdim=True)[1]
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
 
     valid_epoch_loss /= NUM_VALID
     valid_epoch_accuracy = 100. * correct / NUM_VALID
@@ -290,14 +292,14 @@ def test(model, data_loader):
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in data_loader:
-        if args.cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += F.nll_loss(output, target, size_average=False).item()
-        pred = output.data.max(1, keepdim=True)[1]
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+    with torch.no_grad():
+        for data, target in data_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
+            test_loss += F.nll_loss(output, target, size_average=False).item()
+            pred = output.data.max(1, keepdim=True)[1]
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
 
     test_loss /= len(data_loader.dataset)
     test_accuracy = 100. * correct / len(data_loader.dataset)
@@ -359,17 +361,23 @@ def evaluate_and_record_final_results(model, tree_struct, train_loader, valid_lo
     """
     from utils import load_tree_model
     
-    # Calculate total training time
+    # Calculate total training time and final tree depth.
     end_time = time.time()
     total_train_time = end_time - start_time if start_time is not None else 0
     train_hours = int(total_train_time // 3600)
     train_mins = int((total_train_time % 3600) // 60)
     train_secs = int(total_train_time % 60)
+    final_tree_depth = max([node['level'] for node in tree_struct]) if tree_struct else 0
+    final_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    records['final_tree_depth'] = final_tree_depth
+    records['final_trainable_params'] = final_trainable_params
     
     print("\n" + "="*60)
     print("Final Inference Evaluation: Soft vs Hard")
     print("="*60)
     print(f"Total Training Time: {train_hours:02d}h {train_mins:02d}m {train_secs:02d}s ({total_train_time:.1f}s)")
+    print(f"Final Tree Depth: {final_tree_depth}")
+    print(f"Final Trainable Parameters: {final_trainable_params:,}")
     
     model_path = "./experiments/{}/{}/{}/checkpoints/model.pth".format(
         args.dataset, args.experiment, args.subexperiment
@@ -434,6 +442,8 @@ def evaluate_and_record_final_results(model, tree_struct, train_loader, valid_lo
         f.write("="*60 + "\n")
         f.write(f"Dataset: {args.dataset}\n")
         f.write(f"Experiment: {args.experiment}\n")
+        f.write(f"Final Tree Depth: {final_tree_depth}\n")
+        f.write(f"Final Trainable Parameters: {final_trainable_params:,}\n")
         f.write(f"Training Time: {train_hours:02d}h {train_mins:02d}m {train_secs:02d}s\n")
         f.write(f"Training Time (seconds): {total_train_time:.1f}\n\n")
         
@@ -686,6 +696,20 @@ def grow_ant_nodewise():
     )
     checkpoint_model('model.pth', struct=tree_struct, modules=tree_modules)
     checkpoint_msc(tree_struct, records)
+
+    if not args.ensemble:
+        print("\nEnsemble mode disabled: skipping ANT growth (split/extend).")
+        model_final = Tree(tree_struct, tree_modules, split=False, cuda_on=args.cuda)
+        if args.cuda:
+            model_final.cuda()
+        print_model_parameter_stats(model_final, title='Final tree model')
+        evaluate_and_record_final_results(
+            model_final, tree_struct,
+            train_loader, valid_loader, test_loader,
+            start_time=start,
+        )
+        checkpoint_msc(tree_struct, records)
+        return
 
     # ######################## 1: Growth phase starts ########################
     nextind = 1
